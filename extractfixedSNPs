@@ -1,0 +1,99 @@
+#!/usr/bin/env python
+"""
+Created on Wed May 29 10:55:04 2013
+
+@author: nathanieldavidchu
+Extracts SNPs that are fixed between two groups when at least a certain number of populations are represented.
+
+Usage:
+./ExtractFixedSNPs.py -i <inputhaplotypefile> -p <group1list> -q <group2list> -n <numberrepresented> -o <output>
+"""
+def reorder(tuplist, numsnps):
+    """(tuple list) -> (tuple list)
+    Takes a tuples list of alleles from populations after being split from STACKS and returns a list of lists, where each list is the sorted alleles for each SNP position
+    reorder([['TGA', 'ACT'], ['TGA', 'ACG'], ['TGG', 'TCT']], 3)
+        [[['A', 'T'], ['A', 'T'], ['T']], [['C', 'G'], ['C', 'G'], ['C', 'G']], [['A', 'T'], ['A', 'G'], ['T', 'G']]]
+    """
+    alleles1 = []
+    for i in range(numsnps):
+        alleles2 = []
+        for j in tuplist:
+            alleles2.append([x[i] for x in j])
+        alleles1.append([list(set(y)) for y in alleles2])
+    return alleles1
+
+
+def ExtractBetweenTwoGroupsExclusion(radtagsfile, poplist1, poplist2, exclulist, numrep):
+    """(file, list, list) -> (file)
+    Take STACKS excel output and two population lists and output fixed SNPs between those two lists as long as there were no results for those populations in eclulist1
+    numrep is the smallest number of populations represented, so all stacks with fewer than that many populations (represented in the two lists) will not be retained
+    """
+    import csv
+    with open(radtagsfile, "U") as f:
+        radtags = csv.reader(f, delimiter="\t")
+        radheader = radtags.next()
+        snpindex = radheader.index("Num SNPs")
+        catalogidindex = radheader.index("Catalog ID")
+        consensusindex = radheader.index("Consensus Sequence")
+        poplist1ind = [radheader.index(x) for x in poplist1]
+        poplist2ind = [radheader.index(x) for x in poplist2]
+        exclulistind = [radheader.index(x) for x in exclulist if exclulist != []]
+        poplistallind = poplist1ind + poplist2ind
+        fixedcatalogIDs = []
+        consensusseqs = []
+        for i in radtags:
+            numrepval = sum([1 for x in poplistallind if i[x] != ""])
+            if all([int(i[snpindex]) < 4, int(i[snpindex]) > 0]) and all([i[x] != "" for x in poplistallind]) and all([i[x] == "" for x in exclulistind if exclulist != []]):
+                count = 0
+                allelespre = []
+                allelespre1 = [i[y].split("/") for y in poplist1ind  if i[y] != ""]
+                allelespre.append(set([allele for pop in allelespre1 for allele in pop]))
+                allelespre2 = [i[y].split("/") for y in poplist2ind if i[y] != ""]
+                allelespre.append(set([allele for pop in allelespre2 for allele in pop]))
+                allelesord = reorder(allelespre, int(i[snpindex]))
+                for j in allelesord:
+                    if set(j[0]).intersection(j[1]) == set([]):
+                            count += 1
+                if count > 0 and numrepval >= numrep:
+                    fixedcatalogIDs.append(i[catalogidindex])
+                    consensusseqs.append(i[consensusindex])
+        out = [fixedcatalogIDs[k] + "\t" + consensusseqs[k] + "\n" for k in range(len(fixedcatalogIDs))]
+        return out
+
+def ExtractFixedBetweenMembersofTwoGroups(radtagsfile, poplist1, poplist2, numrep, output):
+    """(file, list, list) -> (file)
+    Take STACKS haplotype output and two population lists and output fixed SNPs between two groups but with representation of at least numrep populations (i.e. other group members can be missing the allele in question as long as the total number of populations represented is above a given threshold)
+    """
+    from itertools import combinations    
+    out = []
+    fullpoplist = poplist1 + poplist2
+    comblist = []
+    poplist1comb = []
+    for i in range(1, len(poplist1) + 1):
+        for j in combinations(poplist1, i):
+            poplist1comb.append(list(j))
+    poplist2comb = []
+    for k in range(1, len(poplist2) + 1):
+        for l in combinations(poplist2, k):
+            poplist2comb.append(list(l))
+    for m in poplist1comb:
+        for n in poplist2comb:
+            comblist.append([m, n])
+    for o in comblist:
+        intralist = o[0] + o[1]
+        exclulist = [pop for pop in fullpoplist if pop not in intralist]
+        out.extend(ExtractBetweenTwoGroupsExclusion(radtagsfile, o[0], o[1], exclulist, numrep))
+    with open(output, "w+") as g:
+        for p in out:
+            g.write(p)
+    
+if __name__ == "__main__":
+	import argparse
+	parser = argparse.ArgumentParser(description="Extract Fixed SNPs")
+	parser.add_argument('-i', '--inputhaplo')
+	parser.add_argument('-p', '--group1list')
+	parser.add_argument('-q', '--group2list')
+	parser.add_argument('-n', '--numberrepresented')
+	parser.add_argument('-o', '--output')
+	args = parser.parse_args()
+	ExtractFixedBetweenMembersofTwoGroups(args.inputhaplo, args.group1list, args.group2list, args.numberrepresented, args.output)
